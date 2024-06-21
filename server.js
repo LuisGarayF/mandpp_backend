@@ -127,6 +127,7 @@ app.get('/regiones', async (req, res) => {
             });
             return mappedRow;
         });
+        //console.log(mappedResult);
 
         res.json(mappedResult);
     } catch (err) {
@@ -195,10 +196,10 @@ app.get('/penitenciario/:peticionid', async (req, res) => {
         connection = await getConnection();
         const result = await connection.execute(
             `SELECT PR.PETICIONID AS peticionid,
-                PR.PETICIONREQUERIMIENTOID AS peticionrequerimientoid,
-                PR.TERMINOREQUERIMIENTOID AS terminorequerimientoid,
-                EP.ESTADOPETICION AS estadopeticion,
-                EP.ESTADOPETICIONID AS estadopeticionid
+                PR.PETICIONREQUERIMIENTOID AS requerimientoid,
+                PR.TERMINOREQUERIMIENTOID AS terminoreqid,
+                INITCAP(EP.ESTADOPETICION) AS estadopeticion,
+                EP.ESTADOPETICIONID AS estadoid
             FROM PENITENCIARIO.TBL_PETICIONREQUERIMIENTO PR
             JOIN PENITENCIARIO.TBL_PETICION PE ON PR.PETICIONID = PE.PETICIONID
             JOIN PENITENCIARIO.TBL_ESTADOPETICION EP ON PE.PET_ESTADOID = EP.ESTADOPETICIONID
@@ -227,6 +228,125 @@ app.get('/penitenciario/:peticionid', async (req, res) => {
         }
     }
 });
+
+
+app.get('/abrir-peticion/:peticionid/:requerimientoid', async (req, res) => {
+    const peticionid = req.params.peticionid;
+    const requerimientoid = req.params.requerimientoid;
+    let connection;
+
+    try {
+        connection = await getConnection();
+        const result = await connection.execute(
+            `
+            DECLARE 
+                IN_PETICIONID NUMBER;
+                IN_PETICIONREQUERIMIENTOID NUMBER;
+                O_ERRORCODE NUMBER;
+                O_ERRORMSG VARCHAR2(32767);
+
+            BEGIN 
+                IN_PETICIONID := :id;
+                IN_PETICIONREQUERIMIENTOID := :req;
+                O_ERRORCODE := NULL;
+                O_ERRORMSG := NULL;
+
+                SGDP_USER.PKG_SOPORTE_DPP.UPD_REVERSAFORMATERMINOPET ( IN_PETICIONID, IN_PETICIONREQUERIMIENTOID, O_ERRORCODE, O_ERRORMSG );
+                COMMIT; 
+            END;`, [peticionid, requerimientoid]);
+
+        res.json({ message: 'Petición Penitenciaria Re Abierta' });
+    } catch (err) {
+        console.error('Error al obtener datos:', err);
+        res.status(500).json({ error: 'Error al obtener datos' });
+    } finally {
+        if (connection) {
+            try {
+                await connection.close();
+            } catch (err) {
+                console.error('Error al cerrar la conexión:', err);
+            }
+        }
+    }
+});
+
+
+app.get('/obtener-monto/:defensoriaid/:anio/:mes/:tipoinforme', async (req, res) => {
+    const defensoriaid = req.params.defensoriaid;
+    const anio = req.params.anio;
+    const mes = req.params.mes;
+    const tipoinforme = req.params.tipoinforme;
+
+    let connection;
+
+    try {
+        connection = await getConnection();
+        const result = await connection.execute(
+            `SELECT  DF.NOMDEFENSORIA as defensoria,
+                        CN.CONTRATOID as contratoid, 
+                        DF.DEFENSORIAID as defensoriaid,
+                        PG.H_MONTOPAGO as montopago,
+                        FAC.MONTODCTO as montofact, 
+                        DT.MONTODCTO as montodcto, 
+                        IP.ANIO as anio,
+                        IP.MES as mes, 
+                        PG.PAGOID as pagoid, 
+                        DT.DCTOTRIBUTARIOID as dctotributario, 
+                        IP.TIPOINFORME as tipoinformeid, 
+                        TIP.TIPOINFORME as tipoinforme, 
+                        CN.LICITACIONID as licitacionid,
+                        EST.ESTADOPAGO as estadopago,
+                        PG.H_RETENCIONIMPTO as retencionimpto, 
+                        PG.H_FONDORESNORMAL as fondoresnormal, 
+                        CN.VALORCOMPETENCIAOFERTA as valorcompetenciaoferta, 
+                        CN.FECHAHASTAVIGENCIA as fechahastavigencia, 
+                        LIC.IDCHILECOMPRA as idchilecompra, 
+                        DF.REGIONID as regionid, 
+                        (DF.RUT||'-'||DF.DV) as rutempresa, 
+                        DF.ZONAID as zonaid, 
+                        PG.H_MONTOINDISPONIBILIDAD as montodisponibilidad, 
+                        LIC.FLG_PLAUSIBILIDAD as plausibilidad         
+                FROM TBL_CONTRATO_NEW CN
+                JOIN TBL_DEFENSORIA DF ON DF.DEFENSORIAID = CN.DEFENSORIAID
+                LEFT JOIN TBL_INFORME_PAGO_ENC IP ON IP.DEFENSORIAID = DF.DEFENSORIAID
+                LEFT JOIN TBL_PAGO PG ON PG.PAGOID = IP.PAGOID
+                LEFT JOIN TBL_DCTOTRIBUTARIO DT ON DT.DCTOTRIBUTARIOID = PG.DCTOTRIBUTARIOID
+                LEFT JOIN SEG_FAC.FACTURAS FAC ON FAC.PAGOID = PG.PAGOID
+                LEFT JOIN TBL_TIPOINFORME TIP ON IP.TIPOINFORME = TIP.TIPOINFORMEID 
+                JOIN TBL_LICITACION_NEW LIC ON CN.LICITACIONID = LIC.LICITACIONID
+                LEFT JOIN TBL_ESTADOPAGO EST ON EST.ESTADOPAGOID = PG.ESTADOPAGOID
+                WHERE DF.DEFENSORIAID = :defensoriaid
+                AND IP.ANIO = :anio
+                AND IP.MES = :mes
+                AND IP.TIPOINFORME = :tipoinforme`,
+            { defensoriaid, anio, mes, tipoinforme }
+        );
+
+        const columns = result.metaData.map(meta => meta.name.toLowerCase());
+        const data = result.rows.map(row => {
+            let obj = {};
+            row.forEach((val, index) => {
+                obj[columns[index]] = val;
+            });
+            return obj;
+        });
+
+        res.json({ message: 'Montos Obtenidos', data: data });
+    } catch (err) {
+        console.error('Error al obtener datos:', err);
+        res.status(500).json({ error: 'Error al obtener datos' });
+    } finally {
+        if (connection) {
+            try {
+                await connection.close();
+            } catch (err) {
+                console.error('Error al cerrar la conexión:', err);
+            }
+        }
+    }
+});
+
+
 
 
 // Iniciar servidor
